@@ -1,0 +1,40 @@
+name: Tests
+on: [push, pull_request]
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        tmux: [system, '3.2']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Verify runner tmux on Linux
+        if: runner.os == 'Linux'
+        run: tmux -V
+      - name: Install tmux on macOS
+        if: runner.os == 'macOS'
+        run: command -v tmux || brew install tmux
+      - name: Build minimum supported tmux
+        if: matrix.tmux == '3.2'
+        run: |
+          pkg-config --exists libevent || brew install libevent
+          mkdir -p .compat
+          curl --fail --silent --show-error --location \
+            https://github.com/tmux/tmux/releases/download/3.2/tmux-3.2.tar.gz \
+            --output .compat/tmux-3.2.tar.gz
+          tar -xzf .compat/tmux-3.2.tar.gz -C .compat
+          cd .compat/tmux-3.2
+          CPPFLAGS="$(pkg-config --cflags libevent)" \
+            LDFLAGS="$(pkg-config --libs-only-L libevent)" sh configure
+          make -j2
+          echo "$PWD" >> "$GITHUB_PATH"
+      - name: Verify TPM executable entrypoint
+        run: test -x tmux-agent-overview.tmux
+      - run: python3 -m unittest discover -s tests/unit -v
+      - run: python3 -m unittest discover -s tests/integration -v
+      - run: python3 -m compileall -q src tests
+      - run: bash -n tmux-agent-overview.tmux
