@@ -1,0 +1,63 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract changelog notes
+        id: notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 <<'PY'
+          import os
+          import pathlib
+          import re
+
+          tag = os.environ["TAG"]
+          version = tag[1:] if tag.startswith("v") else tag
+          notes_file = pathlib.Path(os.environ["RUNNER_TEMP"]) / "release-notes.md"
+          notes = ""
+          changelog = pathlib.Path("CHANGELOG.md")
+          if changelog.is_file():
+              text = changelog.read_text(encoding="utf-8")
+              heading = re.compile(
+                  rf"^##[ \t]+\[?v?{re.escape(version)}\]?(?:[ \t].*)?$",
+                  re.MULTILINE,
+              )
+              match = heading.search(text)
+              if match:
+                  rest = text[match.end() :]
+                  nxt = re.search(r"^##[ \t]+", rest, re.MULTILINE)
+                  notes = (rest[: nxt.start()] if nxt else rest).strip()
+          notes_file.write_text(notes + ("\n" if notes else ""), encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              if notes:
+                  out.write("has_notes=true\n")
+                  out.write(f"notes_file={notes_file}\n")
+              else:
+                  out.write("has_notes=false\n")
+          PY
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          HAS_NOTES: ${{ steps.notes.outputs.has_notes }}
+          NOTES_FILE: ${{ steps.notes.outputs.notes_file }}
+        run: |
+          if [ "$HAS_NOTES" = "true" ]; then
+            gh release create "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
