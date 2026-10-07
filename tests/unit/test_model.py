@@ -6,7 +6,7 @@ from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "src"))
 from tmux_agent_overview.discovery import detect, descendant_kind
-from tmux_agent_overview.model import Agent, KINDS, capacity, card_content_size, card_frame, card_margin, classify, clean, clip, label, native_layout
+from tmux_agent_overview.model import Agent, KINDS, capacity, card_content_size, card_frame, card_margin, classify, clean, clip, label, native_layout, quota_limit, quota_summary
 from tmux_agent_overview.watcher import Watcher
 
 
@@ -123,6 +123,40 @@ class ModelTests(unittest.TestCase):
                 {"session": "copilot-dev", "window": 1, "kind": "copilot", "state": state}]})
             self.assertEqual(watcher.state(agent, [agent]), state)
         watcher.close()
+
+    def test_watcher_quota_and_unknown_events(self):
+        watcher = Watcher()
+        watcher.event({"v": 1, "type": "state", "session": "dev", "window": 0, "kind": "claude", "state": "idle"})
+        watcher.event({"v": 1, "type": "quota", "kind": "claude", "plan": "Max 5x", "stale": False, "windows": [
+            {"id": "session", "label": "5h", "usedPercent": 33, "resetsAt": "2026-10-07T12:00:00Z"},
+            {"id": "week", "label": "7d", "usedPercent": 13.5}]})
+        plan, windows, stale = watcher.quota["claude"]
+        self.assertEqual((plan, stale), ("Max 5x", False))
+        self.assertEqual(windows[0][:2], ("5h", 33.0))
+        self.assertIsNotNone(windows[0][2])
+        self.assertIsNone(windows[1][2])
+        # Future event types must not drop the connection or shared states.
+        watcher.event({"v": 1, "type": "something-new", "payload": 1})
+        self.assertIn(("dev", 0), watcher.records)
+        for bad in ({"kind": "unknown", "windows": [{"label": "5h", "usedPercent": 1}]},
+                    {"kind": "codex", "windows": []},
+                    {"kind": "codex", "windows": [{"label": "5h", "usedPercent": 101}]},
+                    {"kind": "codex", "windows": [{"label": "5h", "usedPercent": "1"}]}):
+            watcher.event({"v": 1, "type": "quota", **bad})
+        self.assertNotIn("codex", watcher.quota)
+        watcher.close()
+        self.assertFalse(watcher.quota)
+
+    def test_quota_summary_and_limit(self):
+        now = 1_000_000
+        quota = ("Max 5x", (("5h", 33.0, None), ("7d", 85.0, None)), False)
+        self.assertEqual(quota_summary("claude", quota, now), ("claude · Max 5x · 5h 33% · 7d 85%", "warn"))
+        self.assertIsNone(quota_limit(quota, now))
+        full = ("", (("5h", 100.0, now + 2 * 3600 + 30), ("7d", 40.0, None)), True)
+        self.assertEqual(quota_summary("codex", full, now), ("codex · 5h full · 2h · 7d 40% · stale", "full"))
+        self.assertEqual(quota_limit(full, now), "2h")
+        self.assertEqual(quota_limit(("", (("5h", 100.0, None),), False), now), "")
+        self.assertIsNone(quota_limit(("", (("5h", 100.0, now - 1),), False), now))
 
 
 if __name__ == "__main__":

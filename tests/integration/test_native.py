@@ -139,6 +139,20 @@ class NativeTests(unittest.TestCase):
         (directory / "lock").unlink()
         directory.rmdir()
 
+    def test_quota_status_and_limited_card(self):
+        reset = time.time() + 3 * 3600 + 60
+        self.controller.watcher.quota = {
+            "claude": ("Max 5x", (("5h", 100.0, reset), ("7d", 40.0, None)), False),
+            "codex": ("plus", (("5h", 10.0, None),), False),
+        }
+        view = self.open()
+        status = self.tmux.option("status-right", view.session)
+        self.assertIn("claude · Max 5x · 5h full · 3h · 7d 40%", status)
+        self.assertIn("#[fg=colour203]", status)
+        # Kinds without a local agent stay out of the status line.
+        self.assertNotIn("codex", status)
+        self.assertIn("| limit 3h |", self.tmux.run("capture-pane", "-p", "-t", view.panes[0]))
+
     def test_watcher_socket_shared_copilot(self):
         import json
         import socket
@@ -161,8 +175,18 @@ class NativeTests(unittest.TestCase):
                 connection.sendall(json.dumps(event).encode() + b"\n")
                 watcher.poll(path)
                 self.assertEqual(watcher.records[("fixture", 0)], ("copilot", "waiting-permission"))
+                # Quota and future event types arrive on the same stream without a reconnect.
+                for event in ({"v": 1, "type": "quota", "kind": "claude", "plan": "Max 5x", "stale": False,
+                               "windows": [{"id": "session", "label": "5h", "usedPercent": 42}]},
+                              {"v": 1, "type": "future-event"}):
+                    connection.sendall(json.dumps(event).encode() + b"\n")
+                watcher.poll(path)
+                self.assertEqual(watcher.health, "shared watcher")
+                self.assertEqual(watcher.quota["claude"], ("Max 5x", (("5h", 42.0, None),), False))
+                self.assertIn(("fixture", 0), watcher.records)
             watcher.poll(path)
             self.assertFalse(watcher.records)
+            self.assertFalse(watcher.quota)
             self.assertEqual(watcher.health, "watcher unavailable")
         finally:
             watcher.close()

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .discovery import inventory
 from .hive import Hive, HiveError
-from .model import capacity, card_content_size, card_frame, classify, label, native_layout
+from .model import QUOTA_COLORS, capacity, card_content_size, card_frame, classify, label, native_layout, quota_limit, quota_summary
 from .tmux import Tmux, TmuxError
 from .watcher import Watcher
 
@@ -57,6 +57,7 @@ class View:
     zoom_owner: tuple | None = None
     geometry: tuple = ()
     attachment: str = ""
+    quota: str = ""
 
 
 class Controller:
@@ -461,6 +462,10 @@ class Controller:
                         agent.provenance = "heuristic"
                 kind = f"{agent.host_label or agent.host}/{agent.kind}" if agent.hive_id else agent.kind
                 state_label = agent.state if agent.state == "unknown" else f"{agent.state} ({agent.provenance})"
+                # Quota describes this host's account, so it never applies to Hive cards.
+                limited = None if agent.hive_id or agent.kind not in self.watcher.quota else quota_limit(self.watcher.quota[agent.kind], time.time())
+                if limited is not None:
+                    state_label += " | limit" + (f" {limited}" if limited else "")
                 heading = f"{index + 1} {kind} | {state_label} | {agent.session_name}:{agent.index} {agent.pane}"
                 offset = view.offsets.get(agent.key, 0)
                 lines = text.splitlines()
@@ -484,6 +489,17 @@ class Controller:
         hints = f" AGENTS {len(agents)}/{len(self.agents)} | page {view.page + 1}/{pages} | {health} | Enter focus  z/Z zoom  [] pages  / search  ? help  q close "
         self.tmux.run("set-option", "-t", view.session, "status-left-length", "250")
         self.tmux.run("set-option", "-t", view.session, "status-left", label(hints))
+        local_kinds = {a.kind for a in self.agents if not a.hive_id}
+        meters = []
+        for kind in sorted(local_kinds & set(self.watcher.quota)):
+            text, tone = quota_summary(kind, self.watcher.quota[kind], time.time())
+            # label() neutralises '#', so only these style markers reach tmux.
+            meters.append(f"#[fg={QUOTA_COLORS[tone]}]{label(text)}#[default]")
+        quota = "  ".join(meters) + (" " if meters else "")
+        if quota != view.quota:
+            self.tmux.run("set-option", "-t", view.session, "status-right-length", "200")
+            self.tmux.run("set-option", "-t", view.session, "status-right", quota)
+            view.quota = quota
 
     def shutdown(self):
         if self.hive:

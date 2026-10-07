@@ -70,6 +70,49 @@ def card_frame(rows, width, height, heading="", selected=False, state="unknown")
     return frame + "\x1b[H"
 
 
+QUOTA_WARN, QUOTA_FULL = 80, 100
+QUOTA_COLORS = {"ok": "colour252", "warn": "colour220", "full": "colour203"}
+
+
+def reset_hint(reset, now):
+    if reset is None:
+        return ""
+    minutes = max(0, int(reset - now)) // 60
+    if minutes < 1:
+        return "<1m"
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    return f"{hours}h" if hours < 48 else f"{hours // 24}d"
+
+
+def quota_summary(kind, quota, now, limit=3):
+    """Compact meter like Sessh's quota line: `claude Max 5x · 5h 33% · 7d full · 2h`."""
+    plan, windows, stale = quota
+    parts, tone = [kind] + ([plan] if plan else []), "ok"
+    for name, used, reset in windows[:limit]:
+        if used >= QUOTA_FULL:
+            tone = "full"
+            hint = reset_hint(reset, now)
+            parts.append(f"{name} full" + (f" · {hint}" if hint else ""))
+        else:
+            if used >= QUOTA_WARN and tone == "ok":
+                tone = "warn"
+            parts.append(f"{name} {used:.0f}%")
+    if stale:
+        parts.append("stale")
+    return " · ".join(parts), tone
+
+
+def quota_limit(quota, now):
+    """Reset hint when a quota window is exhausted, otherwise None."""
+    full = [reset for _, used, reset in quota[1] if used >= QUOTA_FULL and (reset is None or reset > now)]
+    if not full:
+        return None
+    known = [reset for reset in full if reset is not None]
+    return reset_hint(max(known), now) if known else ""
+
+
 def label(text):
     # Literal # characters must not become tmux format or style expressions.
     return clean(text).replace("\n", " ").replace("#", "_")[:160]
