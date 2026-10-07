@@ -1,4 +1,6 @@
 import math
+import hashlib
+import json
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -87,10 +89,25 @@ class Agent:
     kind: str
     state: str = "unknown"
     provenance: str = "local"
+    host: str = ""
+    host_label: str = ""
+    hive_id: str = ""
+    socket: str = ""
+    generation: str = ""
+    state_error: str = ""
+    state_age: float = 0
+
+    @property
+    def key(self):
+        if not self.hive_id:
+            return self.pane
+        identity = json.dumps([self.host, self.socket, self.generation, self.pane])
+        return "hive:" + hashlib.sha256(identity.encode()).hexdigest()
 
     @property
     def title(self):
-        return f"{self.kind} | {self.session_name}:{self.index} {self.pane} | {self.path.rsplit('/', 1)[-1]}"
+        host = f"{self.host_label} ({self.host})/" if self.hive_id else ""
+        return f"{self.kind} | {host}{self.session_name}:{self.index} {self.pane} | {self.path.rsplit('/', 1)[-1]}"
 
 
 def capacity(width, height):

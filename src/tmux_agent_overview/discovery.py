@@ -43,7 +43,7 @@ def descendant_kind(root, children, names):
         seen.add(pid)
         command = names.get(pid, "")
         kind = detect(command)
-        if not kind and os.path.basename(command) in ("node", "bun", "deno"):
+        if not kind and os.path.basename(command) in ("node", "bun", "deno", "MainThread"):
             result = subprocess.run(["ps", "-p", str(pid), "-o", "args="], capture_output=True, text=True, timeout=1)
             if result.returncode == 0:
                 kind = detect(result.stdout[:8192])

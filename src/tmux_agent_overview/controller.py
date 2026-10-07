@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .discovery import inventory
+from .hive import Hive, HiveError
 from .model import capacity, card_content_size, card_frame, classify, label, native_layout
 from .tmux import Tmux, TmuxError
 from .watcher import Watcher
@@ -55,6 +56,7 @@ class View:
     search: str = ""
     zoom_owner: tuple | None = None
     geometry: tuple = ()
+    attachment: str = ""
 
 
 class Controller:
@@ -69,6 +71,23 @@ class Controller:
         self.captures = {}
         self.cache = {}
         self.health = ""
+        self.hive_health = ""
+        try:
+            self.hive = Hive.detect(tmux)
+        except HiveError as exc:
+            self.hive = None
+            self.hive_health = str(exc)
+        self.hive_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        self.hive_agents = []
+        self.hive_listing = None
+        self.hive_capture = None
+        self.hive_requested = []
+        self.hive_errors = {}
+        self.hive_states = {}
+        self.hive_state_errors = {}
+        self.hive_attempted = {}
+        self.hive_visible = set()
+        self.next_hive_list = 0
 
     def restore(self, view):
         if view.zoom_owner:
@@ -138,6 +157,40 @@ class Controller:
             if self.tmux.option("@agent-overview-owned", view.session) != "1":
                 raise RuntimeError("refusing to close a session no longer owned by overview")
             self.tmux.run("kill-session", "-t", view.session)
+        self.close_attachment(view)
+
+    def close_attachment(self, view):
+        if view.attachment:
+            sessions = self.tmux.run("list-sessions", "-F", "#{session_id}").splitlines()
+            if view.attachment in sessions:
+                if self.tmux.option("@agent-overview-owned", view.attachment) != "1":
+                    raise RuntimeError("refusing to close a foreign attachment session")
+                self.tmux.run("kill-session", "-t", view.attachment)
+            view.attachment = ""
+
+    def attach_hive(self, view, agent):
+        if not self.hive:
+            raise ValueError("Hive is no longer available")
+        self.close_attachment(view)
+        width, height = self.tmux.display(view.window, "#{window_width} #{window_height}").split()
+        name = "agent-overview-hive-" + hashlib.sha256(view.client.encode()).hexdigest()[:12]
+        existing = self.tmux.run("list-sessions", "-F", "#{session_name}").splitlines()
+        if name in existing:
+            if self.tmux.option("@agent-overview-owned", name) != "1":
+                raise RuntimeError("Hive attachment session name is already in use")
+            self.tmux.run("kill-session", "-t", name)
+        session, window, pane = self.tmux.run(
+            "new-session", "-d", "-s", name, "-n", "hive", "-x", width, "-y", height,
+            "-P", "-F", "#{session_id} #{window_id} #{pane_id}", "sleep 10").split()
+        view.attachment = session
+        self.tmux.run("set-option", "-t", session, "@agent-overview-owned", "1")
+        self.tmux.run("set-option", "-w", "-t", window, "@agent-overview-owned", "1")
+        self.tmux.run("set-option", "-t", session, "key-table", "root")
+        command = shlex.join([os.sys.executable, str(ENTRY), "--socket", self.tmux.socket,
+                              "hive-attach", "--hive", self.hive.command, "--id", agent.hive_id,
+                              "--client", view.client])
+        self.tmux.run("respawn-pane", "-k", "-t", pane, command)
+        self.tmux.run("switch-client", "-c", view.client, "-t", session)
 
     def action(self, request):
         action, client = request.get("action"), request.get("client")
@@ -162,9 +215,15 @@ class Controller:
             self.tmux.run("select-pane", "-t", view.panes[index])
         elif action in ("focus", "zoom-source"):
             source = view.sources.get(active)
-            agent = next((a for a in self.agents if a.pane == source), None)
+            agent = next((a for a in self.agents if a.key == source), None)
             if not agent:
                 raise ValueError("selected agent is no longer available")
+            if agent.hive_id:
+                if action == "zoom-source":
+                    self.tmux.message(client, "Hive source zoom is unavailable; z zooms the preview, Enter attaches via Hive")
+                else:
+                    self.attach_hive(view, agent)
+                return
             # Explicit membership disambiguates linked windows and prevents name matching.
             target = f"{agent.session}:{agent.window}.{agent.pane}"
             self.tmux.display(target, "#{pane_id}")
@@ -213,7 +272,7 @@ class Controller:
             try:
                 agents = self.discovery.result()
                 identities = {(a.session_name, a.index): (a.pane, a.kind) for a in agents}
-                previous = {(a.session_name, a.index): (a.pane, a.kind) for a in self.agents}
+                previous = {(a.session_name, a.index): (a.pane, a.kind) for a in self.agents if not a.hive_id}
                 if identities != previous and self.watcher.sock:
                     self.watcher.records.clear()
                     try:
@@ -221,7 +280,7 @@ class Controller:
                     except OSError:
                         self.watcher.close()
                         self.watcher.health = "watcher unavailable"
-                self.agents = agents
+                self.agents = agents + self.hive_agents
                 self.health = ""
             except (TmuxError, OSError, RuntimeError, subprocess.TimeoutExpired):
                 self.health = "discovery unavailable"
@@ -235,12 +294,21 @@ class Controller:
                 except TmuxError:
                     self.cache.pop(pane, None)
                 del self.captures[pane]
-        live = {a.pane for a in self.agents}
+        live = {a.key for a in self.agents}
         self.cache = {p: data for p, data in self.cache.items() if p in live}
+        self.hive_errors = {p: error for p, error in self.hive_errors.items() if p in live}
+        self.hive_states = {p: state for p, state in self.hive_states.items() if p in live}
+        self.hive_state_errors = {p: error for p, error in self.hive_state_errors.items() if p in live}
+        self.hive_attempted = {p: stamp for p, stamp in self.hive_attempted.items() if p in live}
+        local_agents = [a for a in self.agents if not a.hive_id]
         for agent in self.agents:
-            captured = self.cache.get(agent.pane)
-            agent.state = classify(agent.kind, captured[1]) if captured and now - captured[0] <= 3 else "unknown"
-            shared = self.watcher.state(agent, self.agents)
+            captured = self.cache.get(agent.key)
+            fresh = captured and now - captured[0] <= (6 if agent.hive_id else 3)
+            if agent.hive_id:
+                agent.state, agent.provenance = self.hive_state(agent, now)
+                continue
+            agent.state = classify(agent.kind, captured[1]) if fresh else "unknown"
+            shared = self.watcher.state(agent, local_agents) if not agent.hive_id else None
             if shared is not None:
                 agent.state, agent.provenance = shared, "shared"
             else:
@@ -249,6 +317,7 @@ class Controller:
         for line in self.tmux.run("list-clients", "-F", "#{client_name}\t#{session_id}").splitlines():
             name, session = line.split("\t", 1)
             clients[name] = session
+        self.hive_visible.clear()
         for client, view in list(self.views.items()):
             if client not in clients:
                 self.close(client, False)
@@ -262,11 +331,77 @@ class Controller:
                 self.close(client)
         # A small rotating background budget makes filters useful beyond the page.
         if any(clients.get(v.client) == v.session for v in self.views.values()):
-            stale = sorted(self.agents, key=lambda a: self.cache.get(a.pane, (0, ""))[0])
+            stale = sorted(local_agents, key=lambda a: self.cache.get(a.key, (0, ""))[0])
             for agent in stale[:2]:
                 cached = self.cache.get(agent.pane)
                 if len(self.captures) < 16 and agent.pane not in self.captures and (not cached or now - cached[0] > 2):
                     self.captures[agent.pane] = self.pool.submit(self.tmux.run, "capture-pane", "-p", "-S", "-200", "-t", agent.pane)
+        self.tick_hive(now, any(clients.get(v.client) == v.session for v in self.views.values()))
+
+    def tick_hive(self, now, active):
+        if self.hive_listing and self.hive_listing.done():
+            try:
+                self.hive_agents, self.hive_health = self.hive_listing.result()
+            except HiveError as exc:
+                self.hive_agents = []
+                self.hive_health = str(exc)
+            self.agents = [a for a in self.agents if not a.hive_id] + self.hive_agents
+            for agent in self.hive_agents:
+                if agent.provenance == "shared":
+                    self.hive_states[agent.key] = (now - agent.state_age, agent.state, "shared")
+                elif self.hive_states.get(agent.key, (0, "", ""))[2] == "shared":
+                    self.hive_states.pop(agent.key, None)
+                if agent.state_error:
+                    self.hive_state_errors[agent.key] = agent.state_error
+                else:
+                    self.hive_state_errors.pop(agent.key, None)
+            self.hive_listing = None
+            self.next_hive_list = now + 10
+        if self.hive_capture and self.hive_capture.done():
+            try:
+                results = self.hive_capture.result()
+            except HiveError as exc:
+                results = {agent.key: (None, str(exc), "unknown", "unavailable", "", 0) for agent in self.hive_requested}
+            live = {a.key for a in self.hive_agents}
+            for key, (text, error, state, provenance, state_error, age) in results.items():
+                if key not in live:
+                    continue
+                if error:
+                    self.cache.pop(key, None)
+                    self.hive_states.pop(key, None)
+                    self.hive_errors[key] = error
+                    if error in ("gone", "stale"):
+                        self.next_hive_list = 0
+                else:
+                    self.cache[key] = (now, text)
+                    self.hive_states[key] = (now - age, state, provenance)
+                    self.hive_errors.pop(key, None)
+                if state_error:
+                    self.hive_state_errors[key] = state_error
+                else:
+                    self.hive_state_errors.pop(key, None)
+            self.hive_capture = None
+            self.hive_requested = []
+        if not self.hive or not active:
+            return
+        if self.hive_listing is None and now >= self.next_hive_list:
+            self.hive_listing = self.hive_pool.submit(self.hive.inventory, self.tmux.socket)
+            self.hive_health = self.hive_health or "Hive discovering"
+        if self.hive_capture is None:
+            visible = [a for a in self.hive_agents if a.key in self.hive_visible and
+                       now - max(self.cache.get(a.key, (0, ""))[0], self.hive_attempted.get(a.key, 0)) >= 1]
+            visible.sort(key=lambda a: max(self.cache.get(a.key, (0, ""))[0], self.hive_attempted.get(a.key, 0)))
+            if visible:
+                self.hive_requested = visible[:self.hive.max_targets]
+                for agent in self.hive_requested:
+                    self.hive_attempted[agent.key] = now
+                self.hive_capture = self.hive_pool.submit(self.hive.capture, self.hive_requested)
+
+    def hive_state(self, agent, now):
+        stamp, state, provenance = self.hive_states.get(agent.key, (0, "unknown", "unavailable"))
+        if provenance not in ("shared", "heuristic") or now - stamp > (15 if provenance == "shared" else 6):
+            return "unknown", "unavailable"
+        return state, "Hive watcher" if provenance == "shared" else "Hive heuristic"
 
     def render(self, view, now):
         search = self.tmux.option("@agent-overview-search", view.session).lower()[:256]
@@ -279,11 +414,11 @@ class Controller:
         if search != view.search:
             view.page = 0
             view.search = search
-        elif view.selected in [a.pane for a in agents] and view.geometry and view.geometry[:2] != (width, height):
-            view.page = next(i for i, a in enumerate(agents) if a.pane == view.selected) // size
+        elif view.selected in [a.key for a in agents] and view.geometry and view.geometry[:2] != (width, height):
+            view.page = next(i for i, a in enumerate(agents) if a.key == view.selected) // size
         view.page = min(view.page, pages - 1)
         visible = agents[view.page * size:(view.page + 1) * size]
-        geometry = (width, height, tuple(a.pane for a in visible))
+        geometry = (width, height, tuple(a.key for a in visible))
         if geometry != view.geometry:
             if zoom:
                 self.tmux.run("resize-pane", "-Z", "-t", view.window)
@@ -295,7 +430,7 @@ class Controller:
                 view.panes.append(pane)
                 self.tmux.run("select-layout", "-t", view.window, "tiled")
             self.tmux.run("select-layout", "-t", view.window, native_layout(view.panes, width, height))
-            view.sources = dict(zip(view.panes, (a.pane for a in visible)))
+            view.sources = dict(zip(view.panes, (a.key for a in visible)))
             if view.selected in view.sources.values():
                 selected = next(p for p, source in view.sources.items() if source == view.selected)
                 self.tmux.run("select-pane", "-t", selected)
@@ -306,27 +441,36 @@ class Controller:
             _, content_height = card_content_size(pw, ph)
             agent = visible[index] if index < len(visible) else None
             if agent:
-                captured = self.cache.get(agent.pane)
-                if captured and now - captured[0] > 3:
+                captured = self.cache.get(agent.key)
+                if captured and now - captured[0] > (6 if agent.hive_id else 3):
                     captured = None
-                if len(self.captures) < 16 and agent.pane not in self.captures and (not captured or now - captured[0] >= .5):
+                if agent.hive_id:
+                    self.hive_visible.add(agent.key)
+                elif len(self.captures) < 16 and agent.pane not in self.captures and (not captured or now - captured[0] >= .5):
                     self.captures[agent.pane] = self.pool.submit(self.tmux.run, "capture-pane", "-p", "-S", "-200", "-t", agent.pane)
                 text = captured[1] if captured else ""
-                agent.state = classify(agent.kind, "\n".join(text.splitlines()[-ph:])) if captured else "unknown"
-                shared = self.watcher.state(agent, self.agents)
+                if agent.hive_id:
+                    agent.state, agent.provenance = self.hive_state(agent, now)
+                else:
+                    agent.state = classify(agent.kind, "\n".join(text.splitlines()[-ph:])) if captured else "unknown"
+                shared = self.watcher.state(agent, [a for a in self.agents if not a.hive_id]) if not agent.hive_id else None
                 if shared is not None:
                     agent.state, agent.provenance = shared, "shared"
                 else:
-                    agent.provenance = "heuristic"
-                heading = f"{index + 1} {agent.kind} | {agent.state} ({agent.provenance}) | {agent.session_name}:{agent.index} {agent.pane}"
-                offset = view.offsets.get(agent.pane, 0)
+                    if not agent.hive_id:
+                        agent.provenance = "heuristic"
+                kind = f"{agent.host_label or agent.host}/{agent.kind}" if agent.hive_id else agent.kind
+                state_label = agent.state if agent.state == "unknown" else f"{agent.state} ({agent.provenance})"
+                heading = f"{index + 1} {kind} | {state_label} | {agent.session_name}:{agent.index} {agent.pane}"
+                offset = view.offsets.get(agent.key, 0)
                 lines = text.splitlines()
                 while lines and not lines[-1].strip():
                     lines.pop()
                 end = max(0, len(lines) - offset)
                 rows = lines[max(0, end - content_height):end]
                 if not captured:
-                    rows = ["Loading preview..."]
+                    error = self.hive_errors.get(agent.key)
+                    rows = ["Hive preview unavailable: " + error] if error else ["Loading preview..."]
             else:
                 heading = "No matching agents"
                 rows = ["No running agents detected.", "Use @agent-overview-kind for wrapped processes.", "/ search | Escape clear | q close"]
@@ -335,11 +479,15 @@ class Controller:
             if view.frames.get(pane) != (frame, heading):
                 self.tmux.run("display-message", "-I", "-t", pane, input=frame)
                 view.frames[pane] = (frame, heading)
-        hints = f" AGENTS {len(agents)}/{len(self.agents)} | page {view.page + 1}/{pages} | {self.health or self.watcher.health} | Enter focus  z/Z zoom  [] pages  / search  ? help  q close "
+        state_health = "Hive watcher states unavailable" if self.hive_state_errors else ""
+        health = " | ".join(filter(None, [self.health or self.watcher.health, self.hive_health, state_health]))
+        hints = f" AGENTS {len(agents)}/{len(self.agents)} | page {view.page + 1}/{pages} | {health} | Enter focus  z/Z zoom  [] pages  / search  ? help  q close "
         self.tmux.run("set-option", "-t", view.session, "status-left-length", "250")
         self.tmux.run("set-option", "-t", view.session, "status-left", label(hints))
 
     def shutdown(self):
+        if self.hive:
+            self.hive.cancelled.set()
         for client in list(self.views):
             try:
                 self.close(client)
@@ -347,6 +495,7 @@ class Controller:
                 self.health = "tmux server unavailable during cleanup"
         self.watcher.close()
         self.pool.shutdown(wait=True, cancel_futures=True)
+        self.hive_pool.shutdown(wait=True, cancel_futures=True)
 
 
 def serve(socket_path):
@@ -375,8 +524,9 @@ def serve(socket_path):
         selector.register(listener, selectors.EVENT_READ)
         controller = Controller(Tmux(socket_path))
         started, next_tick = time.monotonic(), 0
+        opened = False
         try:
-            while controller.views or time.monotonic() - started < 5:
+            while controller.views or (not opened and time.monotonic() - started < 5):
                 for key, _ in selector.select(.05):
                     connection, _ = key.fileobj.accept()
                     with connection:
@@ -394,6 +544,7 @@ def serve(socket_path):
                             if not isinstance(request, dict):
                                 raise ValueError("invalid action")
                             controller.action(request)
+                            opened = opened or bool(controller.views)
                             response = {"ok": True}
                         except (ValueError, OSError, TmuxError, RuntimeError):
                             response = {"ok": False, "error": "action failed; check target, client, and overview availability"}

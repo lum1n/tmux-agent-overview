@@ -2,6 +2,7 @@ import pathlib
 import re
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "src"))
 from tmux_agent_overview.discovery import detect, descendant_kind
@@ -24,6 +25,13 @@ class ModelTests(unittest.TestCase):
     def test_descendants(self):
         self.assertEqual(descendant_kind(1, {1: [2], 2: [3]}, {1: "bash", 2: "claude", 3: "git"}), "claude")
         self.assertIsNone(descendant_kind(1, {1: [2, 3]}, {2: "claude", 3: "codex"}))
+
+    def test_mainthread_requires_supported_module(self):
+        for args, kind in (("node /x/@github/copilot/index.js", "copilot"), ("node /x/application.js", None)):
+            with mock.patch("tmux_agent_overview.discovery.subprocess.run",
+                            return_value=mock.Mock(returncode=0, stdout=args)):
+                self.assertEqual(descendant_kind(1, {1: [2], 2: [3]},
+                                                 {1: "bash", 2: "bwrap", 3: "MainThread"}), kind)
 
     def test_control_sequences(self):
         text = "\x1b]52;c;clipboard\x07hello\x1b[31m!\x1b[0m\x00"

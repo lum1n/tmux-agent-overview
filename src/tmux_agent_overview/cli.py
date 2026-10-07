@@ -9,6 +9,7 @@ import sys
 import time
 
 from .controller import ACTIONS, ENTRY, runtime, serve
+from .hive import reference
 from .tmux import Tmux, TmuxError
 
 
@@ -86,6 +87,10 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("install")
     sub.add_parser("serve")
+    attach = sub.add_parser("hive-attach", help="interactive Hive attachment used by the overview")
+    attach.add_argument("--hive", required=True)
+    attach.add_argument("--id", required=True)
+    attach.add_argument("--client", required=True)
     action = sub.add_parser("action")
     action.add_argument("action", choices=sorted(ACTIONS))
     action.add_argument("--client", required=True)
@@ -108,6 +113,20 @@ def main():
             install(tmux)
         elif args.command == "serve":
             serve(socket_path)
+        elif args.command == "hive-attach":
+            ref = reference(args.id)
+            session = tmux.display(os.environ["TMUX_PANE"], "#{session_id}")
+            for _ in range(50):
+                if tmux.client(args.client, "#{session_id}") == session:
+                    break
+                time.sleep(.1)
+            else:
+                raise RuntimeError("Hive attachment client unavailable")
+            result = subprocess.run([args.hive, "agents", "attach", "--id", ref])
+            if result.returncode:
+                tmux.message(args.client, "agent-overview: Hive attachment failed; rediscover or check Hive configuration")
+            if tmux.client(args.client, "#{session_id}") == session:
+                send(tmux, {"action": "open", "client": args.client})
         else:
             send(tmux, {"action": args.action, "client": args.client, "index": args.index})
     except (OSError, ValueError, RuntimeError, TmuxError) as exc:

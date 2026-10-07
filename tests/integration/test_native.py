@@ -19,6 +19,7 @@ class NativeTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(prefix="overview-test-", dir=os.environ.get("TMPDIR"))
         self.tmux = Tmux(self.directory.name + "/tmux.sock")
         self.tmux.run("-f", "/dev/null", "new-session", "-d", "-s", "fixture", "-x", "160", "-y", "48", "cat")
+        self.tmux.run("set-option", "-g", "@agent-overview-hive", "off")
         self.source = self.tmux.display("fixture", "#{pane_id}")
         self.tmux.run("set-option", "-p", "-t", self.source, "@agent-overview-kind", "claude")
         self.client_process = subprocess.Popen(
