@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .discovery import inventory
 from .hive import Hive, HiveError
-from .model import QUOTA_COLORS, capacity, card_content_size, card_frame, classify, label, native_layout, quota_limit, quota_summary
+from .model import QUOTA_COLORS, capacity, card_content_size, card_frame, classify, fit_status, label, native_layout, quota_limit
 from .tmux import Tmux, TmuxError
 from .watcher import Watcher
 
@@ -487,9 +487,7 @@ class Controller:
                 view.frames[pane] = (frame, heading)
         state_health = "Hive watcher states unavailable" if self.hive_state_errors else ""
         health = " | ".join(filter(None, [self.health or self.watcher.health, self.hive_health, state_health]))
-        hints = f" AGENTS {len(agents)}/{len(self.agents)} | page {view.page + 1}/{pages} | {health} | Enter focus  z/Z zoom  [] pages  / search  ? help  q close "
-        self.tmux.run("set-option", "-t", view.session, "status-left-length", "250")
-        self.tmux.run("set-option", "-t", view.session, "status-left", label(hints))
+        base = label(f" AGENTS {len(agents)}/{len(self.agents)} | page {view.page + 1}/{pages} | {health} | ")
         local_kinds = {a.kind for a in self.agents if not a.hive_id}
         readings = [("", kind, self.watcher.quota[kind]) for kind in sorted(local_kinds & set(self.watcher.quota))]
         remote = {}
@@ -499,12 +497,15 @@ class Controller:
                 # Servers on one host share its accounts; prefer a fresh reading.
                 if key not in remote or (remote[key][2] and not agent.quota[2]):
                     remote[key] = agent.quota
-        readings += [(host + " ", kind, quota) for (host, kind), quota in sorted(remote.items())]
-        meters = []
-        for host, kind, reading in readings:
-            text, tone = quota_summary(kind, reading, time.time())
-            # label() neutralises '#', so only these style markers reach tmux.
-            meters.append(f"#[fg={QUOTA_COLORS[tone]}]{label(host + text)}#[default]")
+        readings += [(label(host)[:24] + " ", kind, quota) for (host, kind), quota in sorted(remote.items())]
+        # Hints yield to quota when the bar is too narrow; tmux would cut quota.
+        lefts = (base + "Enter focus  z/Z zoom  [] pages  / search  ? help  q close ", base + "? help ",
+                 label(f" AGENTS {len(agents)}/{len(self.agents)} | ? help "))
+        left, items = fit_status(lefts, readings, width, time.time())
+        self.tmux.run("set-option", "-t", view.session, "status-left-length", "250")
+        self.tmux.run("set-option", "-t", view.session, "status-left", left)
+        # label() neutralises '#', so only these style markers reach tmux.
+        meters = [f"#[fg={QUOTA_COLORS[tone]}]{label(text)}#[default]" for text, tone in items]
         quota = "  ".join(meters) + (" " if meters else "")
         if quota != view.quota:
             self.tmux.run("set-option", "-t", view.session, "status-right-length", "200")

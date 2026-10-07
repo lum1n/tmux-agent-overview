@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Fit the status bar to the window: key hints shorten, then health/page text,
+  then meters compact (plan and later windows dropped) and finally collapse to
+  `+N`. Before, tmux cut quota meters from the start when the left side was long.
+
 ## 0.2.0
 
 - Quota for Hive hosts: when Hive reports a server watcher's `quota`, the

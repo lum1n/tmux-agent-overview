@@ -156,8 +156,10 @@ class NativeTests(unittest.TestCase):
         }
         view = self.open()
         status = self.tmux.option("status-right", view.session)
-        self.assertIn("claude · Max 5x · 5h full · 3h · 7d 40%", status)
+        # The control-mode client is 80 columns: status-left shrinks so quota fits.
+        self.assertIn("claude · Max 5x · 5h full · 3h", status)
         self.assertIn("#[fg=colour203]", status)
+        self.assertEqual(self.tmux.option("status-left", view.session), " AGENTS 1/1 | ? help ")
         # Kinds without a local agent stay out of the status line.
         self.assertNotIn("codex", status)
         self.assertIn("| limit 3h |", self.tmux.run("capture-pane", "-p", "-t", view.panes[0]))
@@ -169,9 +171,11 @@ class NativeTests(unittest.TestCase):
         self.controller.agents += [stale_twin, remote]
         self.controller.render(view, time.monotonic())
         status = self.tmux.option("status-right", view.session)
-        self.assertIn("claude · Max 5x", status)
-        self.assertIn("mac claude · Pro · 5h full · 3h", status)
-        self.assertEqual(status.count("mac claude"), 1)
+        # 80 columns fit one compact meter; the other is counted, never cut mid-text.
+        self.assertIn("]claude · 5h full · 3h#", status)
+        self.assertIn("]+1#", status)
+        frames = [self.tmux.run("capture-pane", "-p", "-t", pane) for pane in view.panes]
+        self.assertTrue(any("mac/claude" in frame and "| limit 3h |" in frame for frame in frames))
 
     def test_watcher_socket_shared_copilot(self):
         import json

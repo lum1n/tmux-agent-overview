@@ -6,7 +6,7 @@ from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "src"))
 from tmux_agent_overview.discovery import detect, descendant_kind
-from tmux_agent_overview.model import Agent, KINDS, capacity, card_content_size, card_frame, card_margin, classify, clean, clip, label, native_layout, quota_limit, quota_summary
+from tmux_agent_overview.model import Agent, KINDS, capacity, card_content_size, card_frame, card_margin, classify, clean, clip, label, native_layout, quota_limit, quota_summary, fit_status
 from tmux_agent_overview.watcher import Watcher
 
 
@@ -158,6 +158,28 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(quota_limit(("", (("5h", 100.0, None),), False), now), "")
         self.assertIsNone(quota_limit(("", (("5h", 100.0, now - 1),), False), now))
 
+    def test_status_fits_width_and_keeps_quota(self):
+        now = 1_000_000
+        lefts = (" AGENTS 9/9 | page 1/1 | shared watcher | Enter focus  ? help  q close ",
+                 " AGENTS 9/9 | page 1/1 | shared watcher | ? help ", " AGENTS 9/9 | ? help ")
+        readings = [("", "claude", ("Max 5x", (("5h", 6.0, None), ("7d", 3.0, None)), False)),
+                    ("box ", "cursor", ("", (("plan", 92.7, None), ("auto", 100.0, now + 7200)), True))]
+        def fit(width):
+            left, items = fit_status(lefts, readings, width, now)
+            return left, [text for text, _ in items]
+        claude, cursor = "claude · Max 5x · 5h 6% · 7d 3%", "box cursor · plan 93% · auto full · 2h · stale"
+        self.assertEqual(fit(300), (lefts[0], [claude, cursor]))
+        self.assertEqual(fit(160), (lefts[1], [claude, cursor]))
+        self.assertEqual(fit(120), (lefts[2], [claude, cursor]))
+        self.assertEqual(fit(80), (lefts[2], ["claude · 5h 6%", "box cursor · plan 93% · stale"]))
+        self.assertEqual(fit(60), (lefts[2], ["claude · 5h 6%", "+1"]))
+        self.assertEqual(fit(30), (lefts[2], ["+2"]))
+        self.assertEqual(fit_status(lefts, [], 40, now), (lefts[2], []))
+        for width in range(50, 320, 7):
+            left, items = fit(width)
+            self.assertLessEqual(len(left) + sum(len(t) + 2 for t in items), width - 12 + 4)
+        tones = dict(fit_status(lefts, readings, 300, now)[1])
+        self.assertEqual((tones[claude], tones[cursor]), ("ok", "full"))
 
 if __name__ == "__main__":
     unittest.main()

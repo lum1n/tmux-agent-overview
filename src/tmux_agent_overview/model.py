@@ -113,10 +113,10 @@ def reset_hint(reset, now):
     return f"{hours}h" if hours < 48 else f"{hours // 24}d"
 
 
-def quota_summary(kind, quota, now, limit=3):
+def quota_summary(kind, quota, now, limit=3, show_plan=True):
     """Compact meter like Sessh's quota line: `claude Max 5x · 5h 33% · 7d full · 2h`."""
     plan, windows, stale = quota
-    parts, tone = [kind] + ([plan] if plan else []), "ok"
+    parts, tone = [kind] + ([plan] if plan and show_plan else []), "ok"
     for name, used, reset in windows[:limit]:
         if used >= QUOTA_FULL:
             tone = "full"
@@ -129,6 +129,34 @@ def quota_summary(kind, quota, now, limit=3):
     if stale:
         parts.append("stale")
     return " · ".join(parts), tone
+
+
+# Room for the window list tmux draws between status-left and status-right.
+STATUS_RESERVE = 12
+
+
+def fit_status(lefts, readings, width, now):
+    """(status-left, [(text, tone)]) that fit `width`; tmux would cut status-right.
+
+    `lefts` are status-left variants, longest first. Quota keeps priority: left
+    text shrinks first, then meters compact, then meters drop (counted as +N).
+    """
+    room = max(0, width - STATUS_RESERVE)
+    def meters(compact):
+        return [(host + text, tone) for (host, kind, q) in readings
+                for text, tone in [quota_summary(kind, q, now, *((1, False) if compact else ()))]]
+    def size(left, items):
+        return len(left) + sum(len(text) + 2 for text, _ in items)
+    full, compact = meters(False), meters(True)
+    for left, items in ([(left, full) for left in lefts] + [(lefts[-1], compact)]):
+        if size(left, items) <= room:
+            return left, items
+    items = compact
+    while items and size(lefts[-1], items) + 4 > room:
+        items = items[:-1]
+    if len(items) < len(readings):
+        items = items + [(f"+{len(readings) - len(items)}", "ok")]
+    return lefts[-1], items
 
 
 def quota_limit(quota, now):
