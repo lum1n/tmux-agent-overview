@@ -108,9 +108,9 @@ Install [tmux-agent-state](https://github.com/lum1n/tmux-agent-state) normally.
 When `@agent_watcher_socket` is available, overview subscribes to the existing
 same-user, version-1 NDJSON stream. It does not start, stop, bind agents into,
 or modify that daemon. Disconnects are visible and standalone previews continue.
-Upstream agent-watcher now supports Copilot; shared Copilot states work when
-your tmux-agent-state installation includes that updated watcher. Its upstream
-pin now includes Copilot at `27538de1a608fd45f6f9046003c20822eedb35ab`.
+Shared Copilot states need tmux-agent-state 0.1.2 or later; subscription
+quota (below) needs 0.2.0 or later, which can disable it with
+`@agent-state-quota 'off'`.
 
 Current watcher records are **window-level**, whereas tiles are **pane-level**.
 Shared state is used only for a matching kind in a window with exactly one
