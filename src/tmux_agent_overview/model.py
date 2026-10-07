@@ -44,7 +44,7 @@ def card_content_size(width, height):
     return card_width - 2 * border, card_height - 2 * border
 
 
-def card_frame(rows, width, height, heading="", selected=False, state="unknown"):
+def card_frame(rows, width, height, heading="", selected=False, state="unknown", footer=""):
     horizontal, vertical = card_margin(width, height)
     content_width, content_height = card_content_size(width, height)
     bordered = width - 2 * horizontal >= 3 and height - 2 * vertical >= 3
@@ -68,6 +68,8 @@ def card_frame(rows, width, height, heading="", selected=False, state="unknown")
             frame += cursor + clip(rows[index], content_width)
     if bordered:
         frame += f"\x1b[{height - vertical};{horizontal + 1}H{outline}╰{'─' * content_width}╯"
+        if footer:
+            frame += f"\x1b[{height - vertical};{horizontal + 2}H\x1b[38;5;250m{clip(' ' + footer + ' ', content_width)}"
     return frame + "\x1b[H"
 
 
@@ -196,6 +198,7 @@ class Agent:
     state_age: float = 0
     # Hive only: the agent's server watcher quota for this kind.
     quota: tuple | None = None
+    window_name: str = ""
 
     @property
     def key(self):
@@ -205,9 +208,15 @@ class Agent:
         return "hive:" + hashlib.sha256(identity.encode()).hexdigest()
 
     @property
+    def location(self):
+        # Hive agents carry the window name as their index.
+        name = f" {self.window_name}" if self.window_name and self.window_name != self.index else ""
+        return f"{self.session_name}:{self.index}{name} | {self.pane} | {self.path.rsplit('/', 1)[-1]}"
+
+    @property
     def title(self):
         host = f"{self.host_label} ({self.host})/" if self.hive_id else ""
-        return f"{self.kind} | {host}{self.session_name}:{self.index} {self.pane} | {self.path.rsplit('/', 1)[-1]}"
+        return f"{self.kind} | {host}{self.location}"
 
 
 def capacity(width, height):

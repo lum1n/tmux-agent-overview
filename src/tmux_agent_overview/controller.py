@@ -402,7 +402,7 @@ class Controller:
         stamp, state, provenance = self.hive_states.get(agent.key, (0, "unknown", "unavailable"))
         if provenance not in ("shared", "heuristic") or now - stamp > (15 if provenance == "shared" else 6):
             return "unknown", "unavailable"
-        return state, "Hive watcher" if provenance == "shared" else "Hive heuristic"
+        return state, "Hive" if provenance == "shared" else "Hive?"
 
     def render(self, view, now):
         search = self.tmux.option("@agent-overview-search", view.session).lower()[:256]
@@ -467,7 +467,8 @@ class Controller:
                 limited = quota_limit(quota, time.time()) if quota else None
                 if limited is not None:
                     state_label += " | limit" + (f" {limited}" if limited else "")
-                heading = f"{index + 1} {kind} | {state_label} | {agent.session_name}:{agent.index} {agent.pane}"
+                heading = f"{index + 1} {kind} | {state_label}"
+                footer = agent.location
                 offset = view.offsets.get(agent.key, 0)
                 lines = text.splitlines()
                 while lines and not lines[-1].strip():
@@ -478,10 +479,10 @@ class Controller:
                     error = self.hive_errors.get(agent.key)
                     rows = ["Hive preview unavailable: " + error] if error else ["Loading preview..."]
             else:
-                heading = "No matching agents"
+                heading, footer = "No matching agents", ""
                 rows = ["No running agents detected.", "Use @agent-overview-kind for wrapped processes.", "/ search | Escape clear | q close"]
             frame = card_frame(rows, pw, ph, heading=heading, selected=bool(active),
-                               state=agent.state if agent else "unknown")
+                               state=agent.state if agent else "unknown", footer=footer)
             if view.frames.get(pane) != (frame, heading):
                 self.tmux.run("display-message", "-I", "-t", pane, input=frame)
                 view.frames[pane] = (frame, heading)

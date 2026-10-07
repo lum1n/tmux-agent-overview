@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- Cards show where an agent lives in a footer on the bottom border:
+  session, window index and name, pane and directory. The heading keeps tile
+  number, kind and state, so narrow cards no longer clip the location away.
+  Window names are also searchable with `/`.
+- Hive state labels are shorter: `(Hive)` for watcher states and `(Hive?)` for
+  text-classified ones, instead of `(Hive watcher)` and `(Hive heuristic)`.
+
 ## 0.2.2
 
 - Loading the plugin from another checkout replaces that checkout's launch

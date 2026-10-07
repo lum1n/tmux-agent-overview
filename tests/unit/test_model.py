@@ -64,6 +64,12 @@ class ModelTests(unittest.TestCase):
         self.assertIn("\x1b[38;5;81;48;5;234m",
                       card_frame([], 12, 6, selected=True))
 
+    def test_card_frame_footer(self):
+        frame = card_frame([], 24, 6, heading="agent", footer="work:2 api | %3 | repo")
+        self.assertIn("\x1b[5;4H\x1b[38;5;250m work:2 api | %3 |", frame)
+        self.assertNotIn("repo", frame)
+        self.assertNotIn("\x1b]52", card_frame([], 40, 10, footer="\x1b]52;c;clipboard\x07safe"))
+
     def test_card_frame_tiny_and_unicode(self):
         self.assertIn("\x1b[1;1Hx", card_frame(["xyz"], 1, 1))
         self.assertIn("\x1b[3;4H中文a", card_frame(["中文ab"], 11, 5))
@@ -77,7 +83,7 @@ class ModelTests(unittest.TestCase):
                     content_width, content_height = card_content_size(width, height)
                     self.assertGreaterEqual(content_width, 1)
                     self.assertGreaterEqual(content_height, 1)
-                    frame = card_frame(["x" * 20] * 10, width, height, heading="long heading")
+                    frame = card_frame(["x" * 20] * 10, width, height, heading="long heading", footer="long footer")
                     for y, x in re.findall(r"\x1b\[(\d+);(\d+)H", frame):
                         self.assertTrue(1 <= int(y) <= height)
                         self.assertTrue(1 <= int(x) <= width)
@@ -114,6 +120,13 @@ class ModelTests(unittest.TestCase):
                 watcher.event(event)
         watcher.close()
         self.assertFalse(watcher.records)
+
+    def test_agent_location(self):
+        agent = Agent("%1", "@1", "$1", "dev", "2", "claude", 1, True, "/src/repo", "claude", window_name="api")
+        self.assertEqual(agent.location, "dev:2 api | %1 | repo")
+        self.assertIn("api", agent.title)
+        hive = Agent("%1", "@1", "$1", "dev", "api", "", 0, False, "/src/repo", "claude", hive_id="x", window_name="api")
+        self.assertEqual(hive.location, "dev:api | %1 | repo")
 
     def test_shared_copilot_states(self):
         watcher = Watcher()

@@ -331,7 +331,7 @@ class HiveSchedulingTests(unittest.TestCase):
         controller.hive_listing = Future()
         controller.hive_listing.set_result(([agent], "Hive connected"))
         controller.tick_hive(100, False)
-        self.assertEqual(controller.hive_state(agent, 110), ("thinking", "Hive watcher"))
+        self.assertEqual(controller.hive_state(agent, 110), ("thinking", "Hive"))
         self.assertEqual(controller.hive_state(agent, 116), ("unknown", "unavailable"))
         self.assertNotIn(agent.key, controller.cache)
         agent = replace(agent, state="unknown", provenance="unavailable", state_error="timeout")
@@ -348,7 +348,7 @@ class HiveSchedulingTests(unittest.TestCase):
         controller.hive_capture = Future()
         controller.hive_capture.set_result({agent.key: ("synthetic", "", "thinking", "shared", "", 14)})
         controller.tick_hive(100, False)
-        self.assertEqual(controller.hive_state(agent, 100), ("thinking", "Hive watcher"))
+        self.assertEqual(controller.hive_state(agent, 100), ("thinking", "Hive"))
         self.assertEqual(controller.hive_state(agent, 102), ("unknown", "unavailable"))
 
 

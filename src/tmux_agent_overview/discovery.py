@@ -56,18 +56,20 @@ def descendant_kind(root, children, names):
 def inventory(tmux):
     fmt = "\t".join(("#{pane_id}", "#{window_id}", "#{session_id}", "#{session_name}",
                      "#{window_index}", "#{pane_current_command}", "#{pane_pid}", "#{pane_active}",
-                     "#{pane_current_path}", "#{@agent-overview-owned}", "#{@agent-overview-kind}", "#{pane_dead}"))
+                     "#{pane_current_path}", "#{@agent-overview-owned}", "#{@agent-overview-kind}", "#{pane_dead}",
+                     "#{window_name}"))
     output = tmux.run("list-panes", "-a", "-F", fmt)
     children, names = process_tree()
     agents = {}
     for line in output.splitlines():
-        fields = line.split("\t")
-        if len(fields) != 12:
+        fields = line.split("\t", 12)
+        if len(fields) != 13:
             continue
-        pane, window, session, name, index, command, pid, active, path, owned, override, dead = fields
+        pane, window, session, name, index, command, pid, active, path, owned, override, dead, window_name = fields
         if owned or dead == "1" or override == "off" or not re.fullmatch(r"%\d+", pane) or not pid.isdigit():
             continue
         kind = override if override in KINDS else (detect(command) or descendant_kind(int(pid), children, names))
         if kind and pane not in agents:
-            agents[pane] = Agent(pane, window, session, name, index, command, int(pid), active == "1", path, kind)
+            agents[pane] = Agent(pane, window, session, name, index, command, int(pid), active == "1", path, kind,
+                                 window_name=window_name)
     return sorted(agents.values(), key=lambda a: (a.session_name, int(a.index), int(a.pane[1:])))

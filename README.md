@@ -76,7 +76,9 @@ roughly 40x10 minimum tile size. Smaller terminals show one preview. Borders
 include tile number, kind, textual state, provenance, and source identity.
 Previews have a dark card surface and rounded, terminal-drawn borders, with
 two columns of exterior spacing on each side and one row above and below.
-Headings sit in the card border; content starts directly inside it. Native
+Headings sit in the top border; the session, window index and name, pane and
+directory sit in the bottom border, so narrow cards keep both. Content starts
+directly inside the border. Native
 tmux separators are hidden in the gutter, and the selected card has a bright
 outline. Exterior spacing shrinks in small panes; very tiny panes omit the
 border to keep content visible. Rounded corners use Unicode box-drawing
@@ -166,10 +168,10 @@ hosts or servers remain separate agents. Hive inventory refreshes approximately
 every ten seconds while a grid is active. Only visible Hive agents are captured,
 in batches of up to 16, approximately once per second. Updated Hive versions can
 also provide existing remote watcher states in inventory and captures. Known
-watcher states are labelled `Hive watcher`; off-screen state filters can use
+watcher states are labelled `Hive`; off-screen state filters can use
 fresh inventory states without capturing those panes. Without a matching
-watcher, states fall back to Hive's text classification; inconclusive states
-are shown simply as `unknown`. Optional watcher failures appear in status
+watcher, states fall back to Hive's text classification, labelled `Hive?`;
+inconclusive states are shown simply as `unknown`. Optional watcher failures appear in status
 without hiding working previews. Disable that bridge in Hive with
 `agent_watcher = "off"` if desired; no remote watcher installation is required.
 Two separate workers keep slow

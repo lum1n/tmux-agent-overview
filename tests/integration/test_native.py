@@ -168,7 +168,7 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(self.tmux.option("status-left", view.session), " AGENTS 1/1 | ? help ")
         # Kinds without a local agent stay out of the status line.
         self.assertNotIn("codex", status)
-        self.assertIn("| limit 3h |", self.tmux.run("capture-pane", "-p", "-t", view.panes[0]))
+        self.assertIn("| limit 3h ", self.tmux.run("capture-pane", "-p", "-t", view.panes[0]))
         # A Hive card carries its own host's reading; it never borrows local quota.
         from dataclasses import replace
         remote = replace(self.controller.agents[0], pane="%900", hive_id="hive-agent-v1.fixture", host="box",
@@ -181,7 +181,7 @@ class NativeTests(unittest.TestCase):
         self.assertIn("]claude · 5h full · 3h#", status)
         self.assertIn("]+1#", status)
         frames = [self.tmux.run("capture-pane", "-p", "-t", pane) for pane in view.panes]
-        self.assertTrue(any("mac/claude" in frame and "| limit 3h |" in frame for frame in frames))
+        self.assertTrue(any("mac/claude" in frame and "| limit 3h " in frame for frame in frames))
 
     def test_watcher_socket_shared_copilot(self):
         import json
@@ -318,7 +318,8 @@ class NativeTests(unittest.TestCase):
                 self.assertFalse(rows[0].strip())
                 self.assertTrue(rows[1].startswith("  ╭"))
                 self.assertEqual(rows[2], "  │" + "x" * (pw - 6) + "│")
-                self.assertEqual(rows[-2], "  ╰" + "─" * (pw - 6) + "╯")
+                self.assertTrue(rows[-2].startswith("  ╰ fix") and rows[-2].endswith("╯"))
+                self.assertEqual(len(rows[-2]), pw - 2)
                 self.assertFalse(rows[-1].strip())
                 styled = self.tmux.run("capture-pane", "-p", "-e", "-t", pane)
                 self.assertIn("\x1b[48;5;234m", styled)
