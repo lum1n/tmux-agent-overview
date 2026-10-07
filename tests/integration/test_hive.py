@@ -202,8 +202,9 @@ class HiveNativeTests(unittest.TestCase):
         attached = self.tmux.client(self.base.client, "#{session_id}")
         self.base.client_process.terminate()
         self.base.client_process.wait(timeout=3)
-        self.wait(lambda: attached not in self.tmux.run("list-sessions", "-F", "#{session_id}").splitlines())
-        self.assertNotIn(session, self.tmux.run("list-sessions", "-F", "#{session_id}").splitlines())
+        # The attachment can end on its own when its client goes away, before
+        # the controller's next tick removes the grid; wait for both.
+        self.wait(lambda: not {attached, session} & set(self.tmux.run("list-sessions", "-F", "#{session_id}").splitlines()))
         self.assertEqual(self.tmux.display(self.base.source, "#{pane_dead}"), "0")
         self.wait(lambda: not (self.transport_directory / "control.sock").exists())
 

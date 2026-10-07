@@ -1,5 +1,6 @@
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,14 @@ class NativeTests(unittest.TestCase):
         view = self.controller.views[self.client]
         self.controller.render(view, time.monotonic())
         return view
+
+    def prefix_binding(self, key):
+        # tmux 3.7c prints nothing for `list-keys -T table key`; scan the table.
+        for line in self.tmux.run("list-keys", "-T", "prefix").splitlines():
+            words = shlex.split(line)
+            if words[words.index("-T") + 2] == key:
+                return line
+        return ""
 
     def action(self, name):
         self.controller.action({"action": name, "client": self.client})
@@ -111,7 +120,7 @@ class NativeTests(unittest.TestCase):
         install(self.tmux)
         install(self.tmux)
         self.assertEqual(self.tmux.option("status-right"), "synthetic-state")
-        self.assertIn("synthetic-chooser", self.tmux.run("list-keys", "-T", "prefix", "s"))
+        self.assertIn("synthetic-chooser", self.prefix_binding("s"))
         self.tmux.run("bind-key", "O", "display-message", "existing")
         with self.assertRaises(RuntimeError):
             install(self.tmux)
@@ -123,7 +132,7 @@ class NativeTests(unittest.TestCase):
             [str(entrypoint)], env=environment,
             capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("overview.py", self.tmux.run("list-keys", "-T", "prefix", "O"))
+        self.assertIn("overview.py", self.prefix_binding("O"))
 
     def test_controller_transport_and_cleanup(self):
         send(self.tmux, {"action": "open", "client": self.client})
