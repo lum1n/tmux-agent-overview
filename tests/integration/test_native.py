@@ -161,6 +161,17 @@ class NativeTests(unittest.TestCase):
         # Kinds without a local agent stay out of the status line.
         self.assertNotIn("codex", status)
         self.assertIn("| limit 3h |", self.tmux.run("capture-pane", "-p", "-t", view.panes[0]))
+        # A Hive card carries its own host's reading; it never borrows local quota.
+        from dataclasses import replace
+        remote = replace(self.controller.agents[0], pane="%900", hive_id="hive-agent-v1.fixture", host="box",
+                         host_label="mac", kind="claude", quota=("Pro", (("5h", 100.0, reset),), False))
+        stale_twin = replace(remote, pane="%901", socket="/other", quota=("Pro", (("5h", 1.0, None),), True))
+        self.controller.agents += [stale_twin, remote]
+        self.controller.render(view, time.monotonic())
+        status = self.tmux.option("status-right", view.session)
+        self.assertIn("claude · Max 5x", status)
+        self.assertIn("mac claude · Pro · 5h full · 3h", status)
+        self.assertEqual(status.count("mac claude"), 1)
 
     def test_watcher_socket_shared_copilot(self):
         import json

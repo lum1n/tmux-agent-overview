@@ -4,6 +4,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime
 
 KINDS = ("copilot", "claude", "codex", "pi", "opencode", "cursor")
 STATES = ("unknown", "idle", "thinking", "running-tool", "waiting-permission", "errored")
@@ -74,6 +75,32 @@ QUOTA_WARN, QUOTA_FULL = 80, 100
 QUOTA_COLORS = {"ok": "colour252", "warn": "colour220", "full": "colour203"}
 
 
+def parse_quota(event, used_key, resets_key):
+    """(kind, (plan, windows, stale)) from a watcher or Hive reading, else None.
+
+    Quota is optional everywhere, so a malformed reading is dropped, never fatal.
+    """
+    kind, windows, plan = event.get("kind"), event.get("windows"), event.get("plan", "")
+    if kind not in KINDS or not isinstance(plan, str) or not isinstance(windows, list) or not 0 < len(windows) <= 8:
+        return None
+    parsed = []
+    for window in windows:
+        if not isinstance(window, dict):
+            return None
+        name, used, resets = window.get("label"), window.get(used_key), window.get(resets_key)
+        if not isinstance(name, str) or type(used) not in (int, float) or not 0 <= used <= 100:
+            return None
+        reset = None
+        if isinstance(resets, str) and len(resets) <= 64:
+            try:
+                stamp = datetime.fromisoformat(resets.replace("Z", "+00:00"))
+                reset = stamp.timestamp() if stamp.tzinfo else None
+            except (ValueError, OverflowError):
+                reset = None
+        parsed.append((clean(name)[:16], float(used), reset))
+    return kind, (clean(plan)[:24], tuple(parsed), event.get("stale") is True)
+
+
 def reset_hint(reset, now):
     if reset is None:
         return ""
@@ -139,6 +166,8 @@ class Agent:
     generation: str = ""
     state_error: str = ""
     state_age: float = 0
+    # Hive only: the agent's server watcher quota for this kind.
+    quota: tuple | None = None
 
     @property
     def key(self):

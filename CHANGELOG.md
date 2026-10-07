@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Quota for Hive hosts: when Hive reports a server watcher's `quota`, the
+  status line shows a meter per host and kind, and that host's cards show
+  `limit` when exhausted. Requires a Hive build with per-server quota; remote
+  watcher states also need it after agent-watcher started replaying quota.
+
 ## 0.1.0
 
 - Native tmux grid of live, read-only previews for Copilot CLI, Claude Code,

@@ -122,9 +122,11 @@ and Cursor), the grid's right status shows plan and usage per local agent kind,
 e.g. `claude · Max 5x · 5h 33% · 7d 13%`, yellow from 80% and red when a
 window is full. Local cards of an exhausted kind show `limit` with the time to
 reset. The watcher reads the agents' own login files and contacts the vendors;
-overview only displays its normalized percentages. Quota describes this
-machine's accounts, so Hive cards never show it. Unknown watcher event types
-are ignored rather than treated as a disconnect.
+overview only displays its normalized percentages. Quota describes a host's
+accounts: with a Hive version that reports server `quota`, remote hosts get
+their own meters (e.g. `devbox claude · Pro · 5h 40%`) and `limit` marks on
+their cards; local quota is never applied to Hive cards. Unknown watcher event
+types are ignored rather than treated as a disconnect.
 Unknown card states are displayed simply as `unknown`, without a provenance
 suffix. Provenance is retained internally; known states still identify their
 source.

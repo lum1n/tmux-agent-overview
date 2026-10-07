@@ -10,7 +10,7 @@ import time
 import threading
 from datetime import datetime
 
-from .model import Agent, KINDS, STATES, clean
+from .model import Agent, KINDS, STATES, clean, parse_quota
 
 REFERENCE = re.compile(r"hive-agent-v1\.[A-Za-z0-9_-]+")
 FAILURES = {"auth", "offline", "timeout", "cancelled", "unavailable", "discovery",
@@ -216,6 +216,10 @@ def parse_inventory(result, current_socket):
             if server.get("error") is not None:
                 raise HiveError("Hive response invalid")
             generation = identifier(server.get("generation"), r"[1-9][0-9]*:[1-9][0-9]*")
+            # Optional and per-host-account; bad readings are ignored, not fatal.
+            quota = server.get("quota")
+            readings = dict(filter(None, (parse_quota(q, "used_percent", "resets_at")
+                                          for q in quota[:len(KINDS)] if isinstance(q, dict)))) if isinstance(quota, list) else {}
             same_server = host["local"] and os.path.realpath(socket) == os.path.realpath(current_socket)
             for row in rows:
                 row = object_value(row)
@@ -266,7 +270,7 @@ def parse_inventory(result, current_socket):
                                     clean(primary["window_name"]), "", 0, False, clean(path), row["kind"],
                                     state=state, provenance=provenance, host=host_id, host_label=clean(host_label),
                                     hive_id=ref, socket=socket, generation=generation,
-                                    state_error=state_error, state_age=age))
+                                    state_error=state_error, state_age=age, quota=readings.get(row["kind"])))
                 if len(agents) > 8192:
                     raise HiveError("Hive inventory exceeded limit")
     return agents, f"Hive: {unavailable} unavailable host/server(s)" if unavailable else "Hive connected"

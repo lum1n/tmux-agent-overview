@@ -462,8 +462,9 @@ class Controller:
                         agent.provenance = "heuristic"
                 kind = f"{agent.host_label or agent.host}/{agent.kind}" if agent.hive_id else agent.kind
                 state_label = agent.state if agent.state == "unknown" else f"{agent.state} ({agent.provenance})"
-                # Quota describes this host's account, so it never applies to Hive cards.
-                limited = None if agent.hive_id or agent.kind not in self.watcher.quota else quota_limit(self.watcher.quota[agent.kind], time.time())
+                # Quota is per host account: Hive cards use their own server's reading.
+                quota = agent.quota if agent.hive_id else self.watcher.quota.get(agent.kind)
+                limited = quota_limit(quota, time.time()) if quota else None
                 if limited is not None:
                     state_label += " | limit" + (f" {limited}" if limited else "")
                 heading = f"{index + 1} {kind} | {state_label} | {agent.session_name}:{agent.index} {agent.pane}"
@@ -490,11 +491,20 @@ class Controller:
         self.tmux.run("set-option", "-t", view.session, "status-left-length", "250")
         self.tmux.run("set-option", "-t", view.session, "status-left", label(hints))
         local_kinds = {a.kind for a in self.agents if not a.hive_id}
+        readings = [("", kind, self.watcher.quota[kind]) for kind in sorted(local_kinds & set(self.watcher.quota))]
+        remote = {}
+        for agent in self.agents:
+            if agent.hive_id and agent.quota:
+                key = (agent.host_label or agent.host, agent.kind)
+                # Servers on one host share its accounts; prefer a fresh reading.
+                if key not in remote or (remote[key][2] and not agent.quota[2]):
+                    remote[key] = agent.quota
+        readings += [(host + " ", kind, quota) for (host, kind), quota in sorted(remote.items())]
         meters = []
-        for kind in sorted(local_kinds & set(self.watcher.quota)):
-            text, tone = quota_summary(kind, self.watcher.quota[kind], time.time())
+        for host, kind, reading in readings:
+            text, tone = quota_summary(kind, reading, time.time())
             # label() neutralises '#', so only these style markers reach tmux.
-            meters.append(f"#[fg={QUOTA_COLORS[tone]}]{label(text)}#[default]")
+            meters.append(f"#[fg={QUOTA_COLORS[tone]}]{label(host + text)}#[default]")
         quota = "  ".join(meters) + (" " if meters else "")
         if quota != view.quota:
             self.tmux.run("set-option", "-t", view.session, "status-right-length", "200")

@@ -96,6 +96,22 @@ class HiveTests(unittest.TestCase):
         self.assertEqual(len(parsed), 1)
         self.assertIn("box", parsed[0].title)
 
+    def test_server_quota_is_optional_and_per_kind(self):
+        host = host_record()
+        host["servers"][0]["quota"] = [
+            {"kind": "claude", "plan": "Max 5x", "stale": False, "windows": [{"label": "5h", "used_percent": 10}]},
+            {"kind": "cursor", "stale": True, "windows": [
+                {"label": "plan", "used_percent": 92.7, "resets_at": "2026-10-07T12:00:00Z"}]},
+            {"kind": "codex", "windows": [{"label": "5h", "used_percent": 120}]},
+            "not a reading"]
+        agent = parse_inventory(response(host), "/fixture/current.sock")[0][0]
+        plan, windows, stale = agent.quota
+        self.assertEqual((plan, stale, windows[0][:2]), ("", True, ("plan", 92.7)))
+        self.assertIsNotNone(windows[0][2])
+        for quota in (None, "bad", [{"kind": "cursor", "windows": "bad"}]):
+            host["servers"][0]["quota"] = quota
+            self.assertIsNone(parse_inventory(response(host), "/fixture/current.sock")[0][0].quota)
+
     def test_unavailable_is_not_a_healthy_empty_inventory(self):
         failed = {"host": "offline", "label": "offline", "local": False, "status": "offline",
                   "error": {"code": "offline", "message": "SSH host unavailable"}, "servers": []}

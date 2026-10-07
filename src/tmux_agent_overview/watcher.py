@@ -3,9 +3,8 @@ import os
 import socket
 import stat
 import time
-from datetime import datetime
 
-from .model import KINDS, STATES, clean
+from .model import KINDS, STATES, parse_quota
 
 
 class Watcher:
@@ -53,27 +52,9 @@ class Watcher:
         # Newer watchers may add event types; ignoring them keeps states flowing.
 
     def quota_row(self, obj):
-        # Quota is optional: a malformed reading is dropped, never fatal.
-        kind, windows, plan = obj.get("kind"), obj.get("windows"), obj.get("plan")
-        if kind not in KINDS or not isinstance(windows, list) or not 0 < len(windows) <= 8:
-            return
-        parsed = []
-        for window in windows:
-            if not isinstance(window, dict):
-                return
-            name, used, resets = window.get("label"), window.get("usedPercent"), window.get("resetsAt")
-            if not isinstance(name, str) or type(used) not in (int, float) or not 0 <= used <= 100:
-                return
-            reset = None
-            if isinstance(resets, str) and len(resets) <= 64:
-                try:
-                    stamp = datetime.fromisoformat(resets.replace("Z", "+00:00"))
-                    reset = stamp.timestamp() if stamp.tzinfo else None
-                except (ValueError, OverflowError):
-                    reset = None
-            parsed.append((clean(name)[:16], float(used), reset))
-        plan = clean(plan)[:24] if isinstance(plan, str) else ""
-        self.quota[kind] = (plan, tuple(parsed), obj.get("stale") is True)
+        reading = parse_quota(obj, "usedPercent", "resetsAt")
+        if reading:
+            self.quota[reading[0]] = reading[1]
 
     def row(self, row):
         if not isinstance(row, dict):
