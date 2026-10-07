@@ -191,13 +191,11 @@ def parse_inventory(result, current_socket):
             failure(host["error"])
             if host["status"] == "online":
                 raise HiveError("Hive response invalid")
-        if host["status"] == "degraded":
-            unavailable += 1
         if host["status"] not in ("online", "degraded"):
             failure(host.get("error"))
             unavailable += 1
             continue
-        memberships, sockets = 0, set()
+        memberships, sockets, counted = 0, set(), unavailable
         for server in servers:
             server = object_value(server)
             socket = text(server.get("socket"), 1024)
@@ -273,6 +271,9 @@ def parse_inventory(result, current_socket):
                                     state_error=state_error, state_age=age, quota=readings.get(row["kind"])))
                 if len(agents) > 8192:
                     raise HiveError("Hive inventory exceeded limit")
+        # Hive marks a host degraded because of its unavailable servers; count those, not both.
+        if host["status"] == "degraded" and unavailable == counted:
+            unavailable += 1
     return agents, f"Hive: {unavailable} unavailable host/server(s)" if unavailable else "Hive connected"
 
 

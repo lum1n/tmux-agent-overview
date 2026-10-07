@@ -123,6 +123,14 @@ class HiveTests(unittest.TestCase):
         degraded["error"] = {"code": "discovery", "message": "discovery incomplete"}
         _, health = parse_inventory(response(degraded), "/fixture/current.sock")
         self.assertIn("1 unavailable", health)
+        dead = {"socket": "/fixture/dead.sock", "status": "unavailable", "agents": [],
+                "error": {"code": "unavailable", "message": "tmux server unavailable"}}
+        degraded = host_record()
+        degraded["status"] = "degraded"
+        degraded["servers"].append(dead)
+        agents, health = parse_inventory(response(degraded), "/fixture/current.sock")
+        self.assertEqual(len(agents), 1)
+        self.assertEqual(health, "Hive: 1 unavailable host/server(s)")
         bad = host_record()
         bad["servers"][0]["status"] = "unavailable"
         bad["servers"][0]["error"] = {"code": "unavailable", "message": "tmux unavailable"}

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4
+
+- A Hive host with a dead tmux server counted twice in the status line
+  (once for the server, once for the degraded host), so one stale socket read
+  as `2 unavailable host/server(s)`. Each unavailable server now counts once.
+
 ## 0.2.3
 
 - Cards show where an agent lives in a footer on the bottom border:
