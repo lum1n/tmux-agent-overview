@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+- Loading the plugin from another checkout replaces that checkout's launch
+  binding instead of refusing it; switching from a local copy to TPM's no
+  longer leaves the old code bound to `prefix-O`.
+- Install failures (such as a launch key owned by something else) are shown
+  in tmux; TPM discards plugin output, so they were previously silent.
+
 ## 0.2.1
 
 - Fit the status bar to the window: key hints shorten, then health/page text,

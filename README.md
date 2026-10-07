@@ -39,7 +39,11 @@ loading the plugin:
 set -g @agent-overview-key 'G'
 ```
 
-Reloading is idempotent. The plugin does not replace `prefix-s`, root bindings,
+Reloading is idempotent. Loading another checkout (for example switching from a
+local `run-shell` copy to TPM's) takes over the launch key from the previous
+copy; any other existing binding is left alone and reported in tmux. A running
+controller keeps its code until every grid is closed with `q`, or until
+`pkill -f 'overview.py.*serve'`. The plugin does not replace `prefix-s`, root bindings,
 global statusline configuration, or other plugins' hooks. Grid shortcuts,
 mouse behavior, and styling live in a private viewing session for each client.
 

@@ -121,6 +121,12 @@ class NativeTests(unittest.TestCase):
         install(self.tmux)
         self.assertEqual(self.tmux.option("status-right"), "synthetic-state")
         self.assertIn("synthetic-chooser", self.prefix_binding("s"))
+        # Another checkout's launch binding is replaced, not treated as foreign.
+        self.tmux.run("bind-key", "O", "run-shell", "-b", '/usr/bin/python3 /old/checkout/scripts/overview.py '
+                      '--socket /old.sock action --client "#{q:client_name}" open')
+        install(self.tmux)
+        self.assertNotIn("/old/checkout/", self.prefix_binding("O"))
+        self.assertIn("overview.py", self.prefix_binding("O"))
         self.tmux.run("bind-key", "O", "display-message", "existing")
         with self.assertRaises(RuntimeError):
             install(self.tmux)

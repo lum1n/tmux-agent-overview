@@ -23,9 +23,13 @@ def install(tmux):
         words = shlex.split(line)
         table_index = words.index("-T")
         if words[table_index + 2] == key:
-            existing = line
+            existing = words[-1]
             break
-    if existing and str(ENTRY) not in existing:
+    # Another checkout of this plugin (e.g. a dev copy replaced by TPM's) owns
+    # the key with the same launch command; take it over. Anything else is foreign.
+    other_copy = existing and "/scripts/overview.py --socket " in existing and \
+        " action --client " in existing and existing.endswith(" open")
+    if existing and str(ENTRY) not in existing and not other_copy:
         raise RuntimeError("launch key already bound; set @agent-overview-key to a free key")
     tmux.run("bind-key", "-T", "prefix", key, "run-shell", "-b", invoke + "open")
     for key, direction in (("h", "-L"), ("j", "-D"), ("k", "-U"), ("l", "-R"),
