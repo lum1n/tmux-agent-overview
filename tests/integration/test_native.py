@@ -130,6 +130,12 @@ class NativeTests(unittest.TestCase):
         self.tmux.run("bind-key", "O", "display-message", "existing")
         with self.assertRaises(RuntimeError):
             install(self.tmux)
+        # Only another copy's launch command counts as ours, not its other actions.
+        self.tmux.run("bind-key", "O", "run-shell", "-b", '/usr/bin/python3 /old/checkout/scripts/overview.py '
+                      '--socket /old.sock action --client "#{q:client_name}" close')
+        with self.assertRaises(RuntimeError):
+            install(self.tmux)
+        self.assertIn("/old/checkout/", self.prefix_binding("O"))
 
     def test_plugin_entrypoint_loads_on_current_server(self):
         entrypoint = pathlib.Path(__file__).resolve().parents[2] / "tmux-agent-overview.tmux"
