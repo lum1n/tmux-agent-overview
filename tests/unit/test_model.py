@@ -5,8 +5,8 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "src"))
-from tmux_agent_overview.discovery import detect, descendant_kind
-from tmux_agent_overview.model import Agent, KINDS, capacity, card_content_size, card_frame, card_margin, classify, clean, clip, label, native_layout, quota_limit, quota_summary, fit_status
+from tmux_agent_overview.discovery import detect, descendant_kind, inventory
+from tmux_agent_overview.model import Agent, KINDS, capacity, card_content_size, card_frame, card_margin, classify, clean, clip, label, native_layout, parse_quota, quota_limit, quota_summary, fit_status
 from tmux_agent_overview.watcher import Watcher
 
 
@@ -159,6 +159,41 @@ class ModelTests(unittest.TestCase):
         self.assertNotIn("codex", watcher.quota)
         watcher.close()
         self.assertFalse(watcher.quota)
+
+    def test_parse_quota_keys_bounds_and_timestamps(self):
+        window = {"label": "5h", "used_percent": 50, "resets_at": "2026-10-07T12:00:00Z"}
+        kind, (plan, windows, stale) = parse_quota({"kind": "cursor", "windows": [window]}, "used_percent", "resets_at")
+        self.assertEqual((kind, plan, stale), ("cursor", "", False))
+        self.assertEqual(windows[0][:2], ("5h", 50.0))
+        self.assertEqual(windows[0][2], 1791374400.0)
+        # The watcher's camelCase keys do not match Hive's snake_case ones.
+        self.assertIsNone(parse_quota({"kind": "cursor", "windows": [window]}, "usedPercent", "resetsAt"))
+        # A reset without a zone, unparsable or too long is unknown, not fatal.
+        for resets in ("2026-10-07T12:00:00", "soon", "2026-10-07T12:00:00Z" + " " * 64, 1791374400):
+            reading = parse_quota({"kind": "codex", "windows": [{**window, "resets_at": resets}]}, "used_percent", "resets_at")
+            self.assertIsNone(reading[1][1][0][2])
+        reading = parse_quota({"kind": "claude", "plan": "\x1b]52;c;x\x07" + "P" * 40, "stale": "true",
+                               "windows": [{"label": "L" * 40, "used_percent": 0}]}, "used_percent", "resets_at")
+        plan, windows, stale = reading[1]
+        self.assertEqual((plan, windows[0][0], stale), ("P" * 24, "L" * 16, False))
+        for bad in ({"kind": "claude", "plan": None, "windows": [window]},
+                    {"kind": "claude", "windows": [window] * 9},
+                    {"kind": "claude", "windows": [window, "bad"]},
+                    {"kind": "claude", "windows": [{**window, "label": 5}]},
+                    {"kind": "claude", "windows": [{**window, "used_percent": True}]},
+                    {"kind": "claude", "windows": [{**window, "used_percent": -1}]}):
+            self.assertIsNone(parse_quota(bad, "used_percent", "resets_at"))
+
+    def test_inventory_reads_window_name(self):
+        tmux = mock.Mock()
+        tmux.run.return_value = "\n".join([
+            "%3\t@1\t$1\tdev\t2\tclaude\t30\t1\t/src/repo\t\t\t0\tapi\twith tab",
+            "%4\t@2\t$1\tdev\t3\tcodex\t40\t0\t/src/repo\t\t\t0\t",
+            "%5\t@3\t$1\tdev\t4\tcodex\t50\t0\t/src/repo\t\t\t0"])
+        with mock.patch("tmux_agent_overview.discovery.process_tree", return_value=({}, {})):
+            agents = inventory(tmux)
+        self.assertEqual([(a.pane, a.window_name) for a in agents], [("%3", "api\twith tab"), ("%4", "")])
+        self.assertEqual(agents[1].location, "dev:3 | %4 | repo")
 
     def test_quota_summary_and_limit(self):
         now = 1_000_000
