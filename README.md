@@ -58,7 +58,7 @@ mouse behavior, and styling live in a private viewing session for each client.
 | `z` | Zoom/unzoom the selected preview |
 | `Z` | Focus and zoom the original agent |
 | `[` / `]` | Previous/next page |
-| `/` | Search agent kind, session, project, or state |
+| `/` | Search agent kind, session, window, pane, project, or state |
 | `f` | Filter using a kind/state search term |
 | `PageUp` / `PageDown`, wheel | Scroll a bounded preview history |
 | `g` | Follow live output again |
@@ -131,8 +131,10 @@ reset. The watcher reads the agents' own login files and contacts the vendors;
 overview only displays its normalized percentages. Quota describes a host's
 accounts: with a Hive version that reports server `quota`, remote hosts get
 their own meters (e.g. `devbox claude · Pro · 5h 40%`) and `limit` marks on
-their cards; local quota is never applied to Hive cards. Unknown watcher event
-types are ignored rather than treated as a disconnect.
+their cards; local quota is never applied to Hive cards. When the status bar
+is narrow, key hints and page text shorten first, then meters compact and
+finally collapse to `+N`. Unknown watcher event types are ignored rather than
+treated as a disconnect.
 Unknown card states are displayed simply as `unknown`, without a provenance
 suffix. Provenance is retained internally; known states still identify their
 source.
